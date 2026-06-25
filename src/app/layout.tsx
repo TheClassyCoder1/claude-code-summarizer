@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "claude-kanban",
-  description: "A simple AI-assisted kanban board powered by Claude.",
+  title: "claude-code-summarizer",
+  description: "A dashboard of what you built with Claude Code — per session, with token usage and cost.",
 };
 
 export default function RootLayout({

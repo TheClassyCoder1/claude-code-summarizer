@@ -1,23 +1,22 @@
-import Board from "@/components/Board";
-import { listCards } from "@/lib/store";
+import FeatureDashboard from "@/components/FeatureDashboard";
+import { readFeatureRecords } from "@/lib/featureLog";
 
-// Read fresh from the store on each request.
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const cards = await listCards();
+  const records = await readFeatureRecords();
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
-      <div className="mx-auto max-w-6xl px-4 py-8">
+      <div className="mx-auto max-w-5xl px-4 py-8">
         <header className="mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">claude-kanban</h1>
+          <h1 className="text-2xl font-bold tracking-tight">claude-code-summarizer</h1>
           <p className="text-sm text-slate-500">
-            A simple board — drag cards between columns, or let Claude break a
-            goal into tasks.
+            What you built with Claude Code — per session, with token usage and cost.
           </p>
         </header>
-        <Board initialCards={cards} />
+        <FeatureDashboard records={records} />
       </div>
     </main>
   );
