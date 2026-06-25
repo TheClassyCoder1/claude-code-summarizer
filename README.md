@@ -65,6 +65,10 @@ session (with the hook installed) and refresh.
 | `npm run build` | Production build (type-check + lint) |
 | `npm run start` | Serve the production build           |
 | `npm run lint`  | Run ESLint                           |
+| `npm test`      | Run unit tests (`node --test`)       |
+
+To remove the global hook later: `node tools/feature-logger/uninstall.mjs`
+(backs up `settings.json`, leaves your captured records in place).
 
 ## Project layout
 
@@ -72,6 +76,7 @@ session (with the hook installed) and refresh.
 tools/feature-logger/
   feature-logger.mjs   # standalone Stop + SessionEnd hook (no deps)
   install.mjs          # safe, idempotent global installer
+  uninstall.mjs        # reverses install.mjs (backs up settings.json)
   README.md            # hook docs + manual install + testing
 src/
   app/page.tsx         # server: reads feature log → <FeatureDashboard>

@@ -4,7 +4,7 @@ import {
   STATUS_META,
   type FeatureRecord,
 } from "@/lib/featureTypes";
-import { formatDate, formatTokens, formatUsd } from "@/lib/format";
+import { formatDate, formatTokens, formatUsd, shortModel } from "@/lib/format";
 
 function TokenStat({ label, value }: { label: string; value: number }) {
   return (
@@ -43,8 +43,8 @@ export default function FeatureItem({ record }: { record: FeatureRecord }) {
             <p className="truncate text-sm font-semibold text-slate-800">{headline}</p>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            {record.projectName} · {formatDate(record.endedAt)} · {record.turns} iterations ·{" "}
-            {changes} changes
+            {record.projectName} · {formatDate(record.endedAt)} · {shortModel(record.model)} ·{" "}
+            {record.turns} iterations · {changes} changes
             {record.summarySource === "heuristic" && (
               <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
                 heuristic
@@ -96,6 +96,14 @@ export default function FeatureItem({ record }: { record: FeatureRecord }) {
             </div>
           </div>
         </div>
+
+        {record.summaryCostUsd != null && (
+          <p className="mb-4 text-[11px] text-slate-400">
+            Summary call (the one real LLM request): actual{" "}
+            <span className="font-medium text-slate-500">{formatUsd(record.summaryCostUsd)}</span> —
+            session token cost above is estimated.
+          </p>
+        )}
 
         {areas.length > 0 && (
           <div className="mb-4">

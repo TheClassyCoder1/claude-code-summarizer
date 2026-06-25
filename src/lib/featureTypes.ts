@@ -80,6 +80,50 @@ export const STATUS_META: Record<
   },
 };
 
+export type ViewBy = "feature" | "session" | "project";
+
+export type RecordGroup = {
+  key: string;
+  title: string;
+  subtitle: string;
+  records: FeatureRecord[]; // newest first
+  totalOutputTokens: number;
+  totalCostUsd: number;
+};
+
+/** Group flat records by session or project for the dashboard's grouped views.
+ *  Each (session × project) record stays one card; this only buckets them. */
+export function groupRecords(records: FeatureRecord[], by: "session" | "project"): RecordGroup[] {
+  const map = new Map<string, FeatureRecord[]>();
+  for (const r of records) {
+    const key = by === "session" ? r.sessionId : r.projectPath;
+    const arr = map.get(key);
+    if (arr) arr.push(r);
+    else map.set(key, [r]);
+  }
+  return [...map.values()]
+    .map((recs) => {
+      const sorted = [...recs].sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
+      const head = sorted[0];
+      const n = recs.length;
+      return {
+        key: by === "session" ? head.sessionId : head.projectPath,
+        title:
+          by === "project"
+            ? head.projectName
+            : head.summaryHeadline?.trim() || head.userPrompts[0] || head.sessionId.slice(0, 8),
+        subtitle:
+          by === "project"
+            ? `${n} feature${n === 1 ? "" : "s"}`
+            : [...new Set(recs.map((r) => r.projectName))].join(", "),
+        records: sorted,
+        totalOutputTokens: recs.reduce((s, r) => s + r.tokens.output, 0),
+        totalCostUsd: recs.reduce((s, r) => s + r.estimatedCostUsd, 0),
+      };
+    })
+    .sort((a, b) => (a.records[0].endedAt < b.records[0].endedAt ? 1 : -1));
+}
+
 export function aggregate(records: FeatureRecord[]): Aggregates {
   return {
     features: records.length,

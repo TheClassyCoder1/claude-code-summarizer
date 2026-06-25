@@ -13,6 +13,15 @@ export function formatUsd(n: number | undefined | null): string {
   return `$${n.toFixed(2)}`;
 }
 
+// "claude-opus-4-8-20260101" / "us.anthropic.claude-opus-4-8[1m]" → "opus-4-8".
+export function shortModel(model: string): string {
+  return model
+    .replace(/^.*\./, "")
+    .replace(/\[.*?\]$/, "")
+    .replace(/-\d{8}$/, "")
+    .replace(/^claude-/, "");
+}
+
 export function formatDate(iso: string): string {
   // yyyy-mm-dd from an ISO timestamp; falls back to the raw value.
   return typeof iso === "string" && iso.length >= 10 ? iso.slice(0, 10) : iso;

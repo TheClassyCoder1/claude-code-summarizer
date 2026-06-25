@@ -15,7 +15,8 @@ import os from "os";
 import { spawnSync } from "child_process";
 
 // ---------------------------------------------------------------------------
-// Parsing helpers (kept in sync with the app's src/lib/claudeCode.ts logic).
+// Parsing helpers. Pure functions are exported for unit tests; running this
+// file as a hook still executes main() via the entry guard at the bottom.
 // ---------------------------------------------------------------------------
 const MUTATING = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
@@ -55,7 +56,7 @@ const CONFIG_FILES = new Set([
   "components.json",
 ]);
 
-function classify(rel) {
+export function classify(rel) {
   const base = rel.split("/").pop() || rel;
   if (CONFIG_FILES.has(base) || base.startsWith(".env")) return "Project setup";
   if (rel.startsWith("src/lib/") || rel.startsWith("lib/")) return "Data layer & libs";
@@ -67,37 +68,46 @@ function classify(rel) {
   return "Other";
 }
 
-function isRealPrompt(text) {
+export function isRealPrompt(text) {
   if (typeof text !== "string") return false;
   const t = text.trim();
   if (!t || t.length > 1500) return false;
   return !INJECTION.some((re) => re.test(t));
 }
 
-function slugForCwd(cwd) {
+export function slugForCwd(cwd) {
   // Mirror Claude Code's own project-dir scheme: replace "/" with "-".
   return (cwd || "unknown").replace(/\//g, "-");
+}
+
+// Mask common credential shapes before a prompt is persisted/displayed.
+const SECRET_PATTERNS = [
+  /sk-[a-zA-Z0-9-]{20,}/g, // OpenAI / Anthropic style keys
+  /gh[pousr]_[A-Za-z0-9]{30,}/g, // GitHub tokens
+  /AKIA[0-9A-Z]{16}/g, // AWS access key id
+  /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, // JWT
+];
+export function redactSecrets(text) {
+  if (typeof text !== "string") return text;
+  let out = text;
+  for (const re of SECRET_PATTERNS) out = out.replace(re, "[redacted]");
+  return out;
 }
 
 // ---------------------------------------------------------------------------
 // Transcript parsing
 // ---------------------------------------------------------------------------
-function parseTranscript(transcriptPath, fallbackCwd) {
+// Returns ONE base record per project (cwd) touched in the session. A session
+// that works in two repos yields two records (same session_id, different
+// project). Files are attributed to the repo they live under — not the active
+// cwd — so a Write into repo B while cwd is repo A still lands under B.
+export function parseTranscript(transcriptPath, fallbackCwd) {
   const raw = fs.readFileSync(transcriptPath, "utf8");
-  const lines = raw.split("\n");
 
-  let cwd = "";
-  let model = "";
-  const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
-  const created = new Set();
-  const edited = new Set();
-  const commands = [];
-  const userPrompts = [];
-  let turns = 0;
-  let startedAt = null;
-  let endedAt = null;
-
-  for (const line of lines) {
+  // First pass: parse lines and collect the set of cwds for prefix matching.
+  const parsed = [];
+  const knownCwds = new Set();
+  for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     let o;
     try {
@@ -105,83 +115,135 @@ function parseTranscript(transcriptPath, fallbackCwd) {
     } catch {
       continue;
     }
-    if (!cwd && typeof o.cwd === "string") cwd = o.cwd;
+    if (typeof o.cwd === "string" && o.cwd) knownCwds.add(o.cwd);
+    parsed.push(o);
+  }
+  if (knownCwds.size === 0 && fallbackCwd) knownCwds.add(fallbackCwd);
+
+  // Longest-prefix cwd a file lives under; null if it's outside every repo.
+  const cwdForFile = (f) => {
+    let best = null;
+    for (const c of knownCwds) {
+      if ((f === c || f.startsWith(c + "/")) && (!best || c.length > best.length)) best = c;
+    }
+    return best;
+  };
+
+  // Per-cwd accumulators.
+  const byCwd = new Map();
+  const acc = (cwd) => {
+    let a = byCwd.get(cwd);
+    if (!a) {
+      a = {
+        cwd,
+        model: "",
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+        created: new Set(),
+        edited: new Set(),
+        commands: [],
+        userPrompts: [],
+        turns: 0,
+        startedAt: null,
+        endedAt: null,
+      };
+      byCwd.set(cwd, a);
+    }
+    return a;
+  };
+
+  let lastCwd = "";
+  for (const o of parsed) {
+    if (typeof o.cwd === "string" && o.cwd) lastCwd = o.cwd;
+    const lineCwd = lastCwd || fallbackCwd || "";
+    const a = acc(lineCwd);
 
     if (typeof o.timestamp === "string") {
-      if (!startedAt || o.timestamp < startedAt) startedAt = o.timestamp;
-      if (!endedAt || o.timestamp > endedAt) endedAt = o.timestamp;
+      if (!a.startedAt || o.timestamp < a.startedAt) a.startedAt = o.timestamp;
+      if (!a.endedAt || o.timestamp > a.endedAt) a.endedAt = o.timestamp;
     }
 
     if (o.type === "user") {
       const content = o.message?.content;
-      if (isRealPrompt(content)) userPrompts.push(content.trim().slice(0, 300));
+      if (isRealPrompt(content)) a.userPrompts.push(redactSecrets(content.trim().slice(0, 300)));
     } else if (o.type === "assistant") {
-      turns++;
+      a.turns++;
       const u = o.message?.usage;
       if (u) {
-        tokens.input += u.input_tokens || 0;
-        tokens.output += u.output_tokens || 0;
-        tokens.cacheRead += u.cache_read_input_tokens || 0;
-        tokens.cacheCreation += u.cache_creation_input_tokens || 0;
+        a.tokens.input += u.input_tokens || 0;
+        a.tokens.output += u.output_tokens || 0;
+        a.tokens.cacheRead += u.cache_read_input_tokens || 0;
+        a.tokens.cacheCreation += u.cache_creation_input_tokens || 0;
       }
-      if (o.message?.model) model = o.message.model;
+      if (o.message?.model) a.model = o.message.model;
       const content = o.message?.content;
       if (Array.isArray(content)) {
         for (const b of content) {
           if (!b || b.type !== "tool_use") continue;
           const inp = b.input || {};
-          if (b.name === "Write" && typeof inp.file_path === "string") created.add(inp.file_path);
-          else if (MUTATING.has(b.name)) {
+          if (b.name === "Write" && typeof inp.file_path === "string") {
+            acc(cwdForFile(inp.file_path) || lineCwd).created.add(inp.file_path);
+          } else if (MUTATING.has(b.name)) {
             const fp = inp.file_path || inp.notebook_path;
-            if (typeof fp === "string") edited.add(fp);
+            if (typeof fp === "string") acc(cwdForFile(fp) || lineCwd).edited.add(fp);
           } else if (b.name === "Bash" && typeof inp.command === "string") {
-            commands.push(inp.command);
+            a.commands.push(inp.command);
           }
         }
       }
     }
   }
 
-  const effectiveCwd = cwd || fallbackCwd || "";
-  const rel = (f) => {
-    if (effectiveCwd && f.startsWith(effectiveCwd + "/")) return f.slice(effectiveCwd.length + 1);
-    return effectiveCwd ? null : f; // outside project → skip when we know cwd
-  };
+  const bases = [];
+  for (const a of byCwd.values()) {
+    const effectiveCwd = a.cwd;
+    const hasActivity =
+      a.turns > 0 || a.created.size || a.edited.size || a.commands.length || a.userPrompts.length;
+    if (!hasActivity) continue;
 
-  const filesByArea = {};
-  const bucket = (f, kind) => {
-    const r = rel(f);
-    if (!r) return;
-    const area = classify(r);
-    if (!filesByArea[area]) filesByArea[area] = { created: [], edited: [] };
-    filesByArea[area][kind].push(r);
-  };
-  created.forEach((f) => bucket(f, "created"));
-  edited.forEach((f) => {
-    if (!created.has(f)) bucket(f, "edited");
-  });
-  // Sort & dedupe each bucket for stable output.
-  for (const area of Object.keys(filesByArea)) {
-    filesByArea[area].created = [...new Set(filesByArea[area].created)].sort();
-    filesByArea[area].edited = [...new Set(filesByArea[area].edited)].sort();
+    const rel = (f) => {
+      if (effectiveCwd && f.startsWith(effectiveCwd + "/")) return f.slice(effectiveCwd.length + 1);
+      return effectiveCwd ? null : f; // outside project → skip when we know cwd
+    };
+    const filesByArea = {};
+    const bucket = (f, kind) => {
+      const r = rel(f);
+      if (!r) return;
+      const area = classify(r);
+      if (!filesByArea[area]) filesByArea[area] = { created: [], edited: [] };
+      filesByArea[area][kind].push(r);
+    };
+    a.created.forEach((f) => bucket(f, "created"));
+    a.edited.forEach((f) => {
+      if (!a.created.has(f)) bucket(f, "edited");
+    });
+    for (const area of Object.keys(filesByArea)) {
+      filesByArea[area].created = [...new Set(filesByArea[area].created)].sort();
+      filesByArea[area].edited = [...new Set(filesByArea[area].edited)].sort();
+    }
+
+    const sigCommands = [
+      ...new Set(
+        a.commands.map((c) => c.split("\n")[0].trim()).filter((c) => SIGNIFICANT_CMD.test(c)),
+      ),
+    ].slice(0, 10);
+
+    bases.push({
+      projectPath: effectiveCwd,
+      projectName: effectiveCwd ? path.basename(effectiveCwd) : "unknown",
+      model: a.model || "claude-opus-4-8",
+      tokens: a.tokens,
+      turns: a.turns,
+      filesByArea,
+      commands: sigCommands,
+      userPrompts: a.userPrompts.slice(-12),
+      startedAt: a.startedAt || new Date().toISOString(),
+      endedAt: a.endedAt || new Date().toISOString(),
+    });
   }
 
-  const sigCommands = [
-    ...new Set(commands.map((c) => c.split("\n")[0].trim()).filter((c) => SIGNIFICANT_CMD.test(c))),
-  ].slice(0, 10);
-
-  return {
-    projectPath: effectiveCwd,
-    projectName: effectiveCwd ? path.basename(effectiveCwd) : "unknown",
-    model: model || "claude-opus-4-8",
-    tokens,
-    turns,
-    filesByArea,
-    commands: sigCommands,
-    userPrompts: userPrompts.slice(-12),
-    startedAt: startedAt || new Date().toISOString(),
-    endedAt: endedAt || new Date().toISOString(),
-  };
+  // Never regress to zero records: seed one empty base for the known cwd.
+  if (bases.length === 0) bases.push(emptyBase(fallbackCwd || [...knownCwds][0] || ""));
+  return bases;
 }
 
 function emptyBase(cwd) {
@@ -327,48 +389,58 @@ function main() {
 
   // At SessionStart the transcript may be empty/absent — still seed a "to do"
   // record so the dashboard shows the session as started-but-not-picked-up.
-  let base;
+  // A session may touch several projects → one base record (and file) each.
+  let bases;
   if (transcriptPath && fs.existsSync(transcriptPath)) {
-    base = parseTranscript(transcriptPath, input.cwd);
+    bases = parseTranscript(transcriptPath, input.cwd);
   } else if (event === "SessionStart" && input.cwd) {
-    base = emptyBase(input.cwd);
+    bases = [emptyBase(input.cwd)];
   } else {
     return;
   }
-  const file = recordPath(sessionId, base.projectPath);
-  const existing = readExisting(file) || {};
 
-  const record = {
-    schemaVersion: 1,
-    sessionId,
-    ...base,
-    // Preserve any summary already written (e.g. a late Stop after SessionEnd).
-    summary: existing.summary || "",
-    summaryHeadline: existing.summaryHeadline || "",
-    summarySource: existing.summarySource || "",
-    summaryUsage: existing.summaryUsage,
-    summaryCostUsd: existing.summaryCostUsd,
-    updatedAt: new Date().toISOString(),
-  };
+  for (const base of bases) {
+    const file = recordPath(sessionId, base.projectPath);
+    const existing = readExisting(file) || {};
 
-  if (event === "SessionEnd") {
-    const summary = summarizeWithClaude(base) || {
-      ...heuristicSummary(base),
-      summarySource: "heuristic",
+    const record = {
+      schemaVersion: 1,
+      sessionId,
+      ...base,
+      // Preserve any summary already written (e.g. a late Stop after SessionEnd).
+      summary: existing.summary || "",
+      summaryHeadline: existing.summaryHeadline || "",
+      summarySource: existing.summarySource || "",
+      summaryUsage: existing.summaryUsage,
+      summaryCostUsd: existing.summaryCostUsd,
+      updatedAt: new Date().toISOString(),
     };
-    record.summary = summary.summary ?? summary.text;
-    record.summaryHeadline = summary.summaryHeadline ?? summary.headline;
-    record.summarySource = summary.summarySource;
-    record.summaryUsage = summary.summaryUsage;
-    record.summaryCostUsd = summary.summaryCostUsd;
+
+    if (event === "SessionEnd") {
+      // ponytail: one claude -p per project — N calls for an N-project session.
+      // Fine; multi-project sessions are rare. Batch into one call if cost bites.
+      const summary = summarizeWithClaude(base) || {
+        ...heuristicSummary(base),
+        summarySource: "heuristic",
+      };
+      record.summary = summary.summary ?? summary.text;
+      record.summaryHeadline = summary.summaryHeadline ?? summary.headline;
+      record.summarySource = summary.summarySource;
+      record.summaryUsage = summary.summaryUsage;
+      record.summaryCostUsd = summary.summaryCostUsd;
+    }
+
+    writeAtomic(file, record);
   }
-
-  writeAtomic(file, record);
 }
 
-try {
-  main();
-} catch {
-  // never block the user's turn
+// Entry guard: run as a hook (invoked directly), stay quiet when imported by tests.
+import { pathToFileURL } from "url";
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+  try {
+    main();
+  } catch {
+    // never block the user's turn
+  }
+  process.exit(0);
 }
-process.exit(0);

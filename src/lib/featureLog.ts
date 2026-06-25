@@ -44,6 +44,22 @@ const recordSchema = z.object({
 
 const FEATURE_LOG_DIR = path.join(os.homedir(), ".claude", "feature-log");
 
+/** Parse + validate one record file's contents, deriving cost/totals. Returns
+ *  null for anything malformed or schema-invalid. Pure — safe to unit test. */
+export function recordFromJson(text: string): FeatureRecord | null {
+  let parsed;
+  try {
+    parsed = recordSchema.safeParse(JSON.parse(text));
+  } catch {
+    return null;
+  }
+  if (!parsed.success) return null;
+  const r = parsed.data;
+  const totalTokens =
+    r.tokens.input + r.tokens.output + r.tokens.cacheRead + r.tokens.cacheCreation;
+  return { ...r, estimatedCostUsd: estimateCostUsd(r.model, r.tokens), totalTokens };
+}
+
 /** All feature records on this machine, newest first. */
 export async function readFeatureRecords(): Promise<FeatureRecord[]> {
   let projectDirs: string[];
@@ -53,35 +69,34 @@ export async function readFeatureRecords(): Promise<FeatureRecord[]> {
     return []; // hook not installed / nothing captured yet
   }
 
-  const records: FeatureRecord[] = [];
-  for (const proj of projectDirs) {
-    const dir = path.join(FEATURE_LOG_DIR, proj);
-    let files: string[];
-    try {
-      if (!(await fs.stat(dir)).isDirectory()) continue;
-      files = (await fs.readdir(dir)).filter((f) => f.endsWith(".json"));
-    } catch {
-      continue;
-    }
-    for (const file of files) {
+  // Collect every record-file path across all project dirs, then read them
+  // concurrently (one slow disk read no longer blocks the rest).
+  const filePaths: string[] = [];
+  await Promise.all(
+    projectDirs.map(async (proj) => {
+      const dir = path.join(FEATURE_LOG_DIR, proj);
       try {
-        const parsed = recordSchema.safeParse(
-          JSON.parse(await fs.readFile(path.join(dir, file), "utf8")),
-        );
-        if (!parsed.success) continue;
-        const r = parsed.data;
-        const totalTokens =
-          r.tokens.input + r.tokens.output + r.tokens.cacheRead + r.tokens.cacheCreation;
-        records.push({
-          ...r,
-          estimatedCostUsd: estimateCostUsd(r.model, r.tokens),
-          totalTokens,
-        });
+        if (!(await fs.stat(dir)).isDirectory()) return;
+        for (const f of await fs.readdir(dir)) {
+          if (f.endsWith(".json")) filePaths.push(path.join(dir, f));
+        }
       } catch {
-        // skip unreadable file
+        // skip unreadable project dir
       }
-    }
-  }
+    }),
+  );
 
-  return records.sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
+  const parsed = await Promise.all(
+    filePaths.map(async (file) => {
+      try {
+        return recordFromJson(await fs.readFile(file, "utf8"));
+      } catch {
+        return null; // unreadable file
+      }
+    }),
+  );
+
+  return parsed
+    .filter((r): r is FeatureRecord => r !== null)
+    .sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
 }

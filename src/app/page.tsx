@@ -1,4 +1,5 @@
 import FeatureDashboard from "@/components/FeatureDashboard";
+import AutoRefresh from "@/components/AutoRefresh";
 import { readFeatureRecords } from "@/lib/featureLog";
 
 export const runtime = "nodejs";
@@ -18,6 +19,7 @@ export default async function Home() {
         </header>
         <FeatureDashboard records={records} />
       </div>
+      <AutoRefresh />
     </main>
   );
 }
