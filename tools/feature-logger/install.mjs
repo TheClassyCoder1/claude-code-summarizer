@@ -11,16 +11,11 @@
 
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { fileURLToPath } from "url";
+import { DEST_DIR, SETTINGS_PATH, HOOK_COMMAND, writeJsonAtomic } from "./shared.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const claudeDir = path.join(os.homedir(), ".claude");
-const destDir = path.join(claudeDir, "feature-logger");
-const destScript = path.join(destDir, "feature-logger.mjs");
-const settingsPath = path.join(claudeDir, "settings.json");
-// The command Claude Code will run. ~ is expanded by Claude Code.
-const HOOK_COMMAND = "~/.claude/feature-logger/feature-logger.mjs";
+const destScript = path.join(DEST_DIR, "feature-logger.mjs");
 
 export const HOOK_EVENTS = [
   "SessionStart",
@@ -70,7 +65,7 @@ export function pruneStaleHooks(hooks, command, keepEvents) {
 
 function main() {
   // 1. Copy the script.
-  fs.mkdirSync(destDir, { recursive: true });
+  fs.mkdirSync(DEST_DIR, { recursive: true });
   fs.copyFileSync(path.join(here, "feature-logger.mjs"), destScript);
   try {
     fs.chmodSync(destScript, 0o755);
@@ -81,20 +76,20 @@ function main() {
 
   // 2. Load existing settings.json (NOT launcher-settings.json).
   let settings = {};
-  if (fs.existsSync(settingsPath)) {
+  if (fs.existsSync(SETTINGS_PATH)) {
     try {
-      settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
     } catch {
-      log(`! ${settingsPath} is not valid JSON — aborting so it isn't clobbered.`);
+      log(`! ${SETTINGS_PATH} is not valid JSON — aborting so it isn't clobbered.`);
       log("  Fix or remove it, or add the hooks manually (see README).");
       return;
     }
     // Back up before modifying.
-    const backup = `${settingsPath}.bak-${Date.now()}`;
-    fs.copyFileSync(settingsPath, backup);
+    const backup = `${SETTINGS_PATH}.bak-${Date.now()}`;
+    fs.copyFileSync(SETTINGS_PATH, backup);
     log(`✓ Backed up existing settings → ${backup}`);
   } else {
-    log(`• No existing settings.json; creating ${settingsPath}`);
+    log(`• No existing settings.json; creating ${SETTINGS_PATH}`);
   }
 
   // 3. Merge hook entries idempotently.
@@ -120,13 +115,11 @@ function main() {
   // 4. Write atomically.
   if (changed) {
     try {
-      const tmp = `${settingsPath}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(settings, null, 2));
-      fs.renameSync(tmp, settingsPath);
-      log(`✓ Wrote ${settingsPath}`);
+      writeJsonAtomic(SETTINGS_PATH, settings);
+      log(`✓ Wrote ${SETTINGS_PATH}`);
       log("\nDone. Start a NEW Claude Code session for the hooks to take effect.");
     } catch (err) {
-      log(`! Could not write ${settingsPath}: ${err?.message || err}`);
+      log(`! Could not write ${SETTINGS_PATH}: ${err?.message || err}`);
       log("  This can happen in a managed/cloud container where settings are read-only.");
       log("  Add the hooks manually — see tools/feature-logger/README.md.");
     }

@@ -97,6 +97,14 @@ export const STATUS_META: Record<
   },
 };
 
+function sumOutputTokens(records: FeatureRecord[]): number {
+  return records.reduce((s, r) => s + r.tokens.output, 0);
+}
+
+function sumCost(records: FeatureRecord[]): number {
+  return records.reduce((s, r) => s + r.estimatedCostUsd, 0);
+}
+
 export type ViewBy = "feature" | "session" | "project";
 
 export type RecordGroup = {
@@ -134,8 +142,8 @@ export function groupRecords(records: FeatureRecord[], by: "session" | "project"
             ? `${n} feature${n === 1 ? "" : "s"}`
             : [...new Set(recs.map((r) => r.projectName))].join(", "),
         records: sorted,
-        totalOutputTokens: recs.reduce((s, r) => s + r.tokens.output, 0),
-        totalCostUsd: recs.reduce((s, r) => s + r.estimatedCostUsd, 0),
+        totalOutputTokens: sumOutputTokens(recs),
+        totalCostUsd: sumCost(recs),
       };
     })
     .sort((a, b) => (a.records[0].endedAt < b.records[0].endedAt ? 1 : -1));
@@ -146,7 +154,7 @@ export function aggregate(records: FeatureRecord[]): Aggregates {
     features: records.length,
     projects: new Set(records.map((r) => r.projectPath)).size,
     totalTokens: records.reduce((s, r) => s + r.totalTokens, 0),
-    totalOutputTokens: records.reduce((s, r) => s + r.tokens.output, 0),
-    totalCostUsd: records.reduce((s, r) => s + r.estimatedCostUsd, 0),
+    totalOutputTokens: sumOutputTokens(records),
+    totalCostUsd: sumCost(records),
   };
 }

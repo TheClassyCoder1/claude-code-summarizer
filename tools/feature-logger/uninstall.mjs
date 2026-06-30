@@ -10,13 +10,7 @@
 // Run from the repo: node tools/feature-logger/uninstall.mjs
 
 import fs from "fs";
-import path from "path";
-import os from "os";
-
-const claudeDir = path.join(os.homedir(), ".claude");
-const destDir = path.join(claudeDir, "feature-logger");
-const settingsPath = path.join(claudeDir, "settings.json");
-const HOOK_COMMAND = "~/.claude/feature-logger/feature-logger.mjs";
+import { DEST_DIR, SETTINGS_PATH, HOOK_COMMAND, writeJsonAtomic } from "./shared.mjs";
 
 function log(msg) {
   process.stdout.write(`${msg}\n`);
@@ -40,12 +34,12 @@ export function stripOurHooks(arr) {
 
 function main() {
   // 1. Edit settings.json (NOT launcher-settings.json).
-  if (fs.existsSync(settingsPath)) {
+  if (fs.existsSync(SETTINGS_PATH)) {
     let settings;
     try {
-      settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
     } catch {
-      log(`! ${settingsPath} is not valid JSON — aborting so it isn't clobbered.`);
+      log(`! ${SETTINGS_PATH} is not valid JSON — aborting so it isn't clobbered.`);
       return;
     }
     let changed = false;
@@ -63,13 +57,11 @@ function main() {
     }
 
     if (changed) {
-      const backup = `${settingsPath}.bak-${Date.now()}`;
-      fs.copyFileSync(settingsPath, backup);
+      const backup = `${SETTINGS_PATH}.bak-${Date.now()}`;
+      fs.copyFileSync(SETTINGS_PATH, backup);
       log(`✓ Backed up settings → ${backup}`);
-      const tmp = `${settingsPath}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(settings, null, 2));
-      fs.renameSync(tmp, settingsPath);
-      log(`✓ Wrote ${settingsPath}`);
+      writeJsonAtomic(SETTINGS_PATH, settings);
+      log(`✓ Wrote ${SETTINGS_PATH}`);
     } else {
       log("• No feature-logger hooks found in settings.json — nothing to remove.");
     }
@@ -78,9 +70,9 @@ function main() {
   }
 
   // 2. Delete the copied script dir.
-  if (fs.existsSync(destDir)) {
-    fs.rmSync(destDir, { recursive: true, force: true });
-    log(`✓ Removed ${destDir}`);
+  if (fs.existsSync(DEST_DIR)) {
+    fs.rmSync(DEST_DIR, { recursive: true, force: true });
+    log(`✓ Removed ${DEST_DIR}`);
   }
 
   log("\nDone. Captured records remain in ~/.claude/feature-log/ (delete manually if you want).");

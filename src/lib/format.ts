@@ -1,6 +1,8 @@
 // Deterministic formatters (no locale/timezone) so server and client render
 // identically and don't trigger hydration mismatches.
 
+import { cleanModelId } from "./pricing";
+
 export function formatTokens(n: number): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 1)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(n % 1e3 === 0 ? 0 : 1)}k`;
@@ -15,11 +17,7 @@ export function formatUsd(n: number | undefined | null): string {
 
 // "claude-opus-4-8-20260101" / "us.anthropic.claude-opus-4-8[1m]" → "opus-4-8".
 export function shortModel(model: string): string {
-  return model
-    .replace(/^.*\./, "")
-    .replace(/\[.*?\]$/, "")
-    .replace(/-\d{8}$/, "")
-    .replace(/^claude-/, "");
+  return cleanModelId(model).replace(/^claude-/, "");
 }
 
 export function formatDate(iso: string): string {

@@ -13,6 +13,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { spawnSync } from "child_process";
+import { readJsonFile, writeJsonAtomic } from "./shared.mjs";
 
 // ---------------------------------------------------------------------------
 // Parsing helpers. Pure functions are exported for unit tests; running this
@@ -298,19 +299,7 @@ function recordPath(sessionId, projectPath) {
   return path.join(dir, `${sessionId}.json`);
 }
 
-function readExisting(file) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function writeAtomic(file, obj) {
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  fs.renameSync(tmp, file);
-}
+// readJsonFile and writeJsonAtomic imported from ./shared.mjs
 
 // ---------------------------------------------------------------------------
 // Summary (SessionEnd): compact prompt → `claude -p`, heuristic fallback
@@ -428,7 +417,7 @@ function main() {
 
   for (const base of bases) {
     const file = recordPath(sessionId, base.projectPath);
-    const existing = readExisting(file) || {};
+    const existing = readJsonFile(file) || {};
 
     const record = {
       schemaVersion: 2,
@@ -458,7 +447,7 @@ function main() {
       record.summaryCostUsd = summary.summaryCostUsd;
     }
 
-    writeAtomic(file, record);
+    writeJsonAtomic(file, record);
   }
 }
 

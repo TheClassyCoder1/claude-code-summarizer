@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import os from "os";
 import { z } from "zod";
-import { estimateCostUsd } from "./pricing";
+import { estimateCostUsd, totalTokenCount } from "./pricing";
 import type { FeatureRecord } from "./featureTypes";
 
 export type { FeatureRecord, Aggregates } from "./featureTypes";
@@ -56,9 +56,7 @@ export function recordFromJson(text: string): FeatureRecord | null {
   }
   if (!parsed.success) return null;
   const r = parsed.data;
-  const totalTokens =
-    r.tokens.input + r.tokens.output + r.tokens.cacheRead + r.tokens.cacheCreation;
-  return { ...r, estimatedCostUsd: estimateCostUsd(r.model, r.tokens), totalTokens };
+  return { ...r, estimatedCostUsd: estimateCostUsd(r.model, r.tokens), totalTokens: totalTokenCount(r.tokens) };
 }
 
 /** All feature records on this machine, newest first. */
