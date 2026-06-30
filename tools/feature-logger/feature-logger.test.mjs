@@ -7,6 +7,7 @@ import {
   classify,
   isRealPrompt,
   slugForCwd,
+  sanitizeFilename,
   redactSecrets,
   parseTranscript,
   liveStateForEvent,
@@ -68,11 +69,27 @@ test("slugForCwd mirrors Claude Code's slash-to-dash scheme", () => {
   assert.equal(slugForCwd(""), "unknown");
 });
 
+test("sanitizeFilename strips path traversal and separators", () => {
+  assert.equal(sanitizeFilename("abc-123"), "abc-123");
+  assert.equal(sanitizeFilename("../../etc/passwd"), "____etc_passwd");
+  assert.equal(sanitizeFilename("foo/bar\\baz"), "foo_bar_baz");
+  assert.equal(sanitizeFilename(""), "unknown");
+  assert.equal(sanitizeFilename(null), "unknown");
+});
+
 test("redactSecrets masks common credential shapes", () => {
   assert.match(redactSecrets("my key is sk-ant-abc123XYZ456def789ghi"), /\[redacted\]/);
   assert.match(redactSecrets("token ghp_0123456789abcdef0123456789abcdef0123"), /\[redacted\]/);
   assert.match(redactSecrets("aws AKIAIOSFODNN7EXAMPLE here"), /\[redacted\]/);
   assert.match(redactSecrets("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.aaa.bbb"), /\[redacted\]/);
+});
+
+test("redactSecrets masks Slack, Stripe, and npm tokens", () => {
+  assert.match(redactSecrets("slack xoxb-1234567890-abcdefghij"), /\[redacted\]/);
+  // Build the test key dynamically to avoid push-protection false positives.
+  const stripeKey = ["sk", "live", "ABCDEFGHIJKLMNOPQRST0123"].join("_");
+  assert.match(redactSecrets(`key ${stripeKey}`), /\[redacted\]/);
+  assert.match(redactSecrets("npm_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef"), /\[redacted\]/);
 });
 
 test("redactSecrets leaves ordinary prompt text untouched", () => {

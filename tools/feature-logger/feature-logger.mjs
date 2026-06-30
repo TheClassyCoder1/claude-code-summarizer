@@ -80,12 +80,22 @@ export function slugForCwd(cwd) {
   return (cwd || "unknown").replace(/\//g, "-");
 }
 
+// Strip path-separator and traversal characters so an id can safely be used as
+// a filename without escaping its parent directory.
+export function sanitizeFilename(name) {
+  if (typeof name !== "string" || !name) return "unknown";
+  return name.replace(/[\/\\]/g, "_").replace(/\.\./g, "_").replace(/[\x00-\x1f]/g, "");
+}
+
 // Mask common credential shapes before a prompt is persisted/displayed.
 const SECRET_PATTERNS = [
   /sk-[a-zA-Z0-9-]{20,}/g, // OpenAI / Anthropic style keys
   /gh[pousr]_[A-Za-z0-9]{30,}/g, // GitHub tokens
   /AKIA[0-9A-Z]{16}/g, // AWS access key id
   /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, // JWT
+  /xox[bpras]-[A-Za-z0-9-]{10,}/g, // Slack tokens
+  /sk_live_[A-Za-z0-9]{20,}/g, // Stripe secret keys
+  /npm_[A-Za-z0-9]{30,}/g, // npm tokens
 ];
 export function redactSecrets(text) {
   if (typeof text !== "string") return text;
@@ -295,7 +305,7 @@ function emptyBase(cwd) {
 function recordPath(sessionId, projectPath) {
   const dir = path.join(os.homedir(), ".claude", "feature-log", slugForCwd(projectPath));
   fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, `${sessionId}.json`);
+  return path.join(dir, `${sanitizeFilename(sessionId)}.json`);
 }
 
 function readExisting(file) {
