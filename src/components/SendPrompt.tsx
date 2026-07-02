@@ -6,9 +6,11 @@ import { useState } from "react";
 export default function SendPrompt({
   sessionId,
   label,
+  lastReply,
 }: {
   sessionId: string;
   label: string;
+  lastReply?: string;
 }) {
   const router = useRouter();
   const [text, setText] = useState("");
@@ -35,6 +37,16 @@ export default function SendPrompt({
         ↳ Follow-up for “{label}”
       </p>
       <p className="text-[10px] text-cyan-600">continues this session</p>
+      {lastReply && (
+        <div className="mt-2 max-h-28 overflow-y-auto rounded border border-cyan-200 bg-white/70 p-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-cyan-500">
+            Claude&apos;s last reply
+          </p>
+          <p className="mt-0.5 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-600">
+            {lastReply}
+          </p>
+        </div>
+      )}
       <textarea
         value={text}
         disabled={busy}

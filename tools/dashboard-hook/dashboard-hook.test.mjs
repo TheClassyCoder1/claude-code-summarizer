@@ -12,7 +12,43 @@ import {
   buildContinue,
   isStale,
   clampWindow,
+  lastAssistantText,
 } from "./dashboard-hook.mjs";
+
+test("lastAssistantText: last assistant text blocks, redacted, capped", () => {
+  const lines = [
+    { type: "user", message: { content: "hi" } },
+    { type: "assistant", message: { content: [{ type: "text", text: "first reply" }] } },
+    { type: "user", message: { content: "again" } },
+    {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", name: "Bash", input: { command: "ls" } },
+          { type: "text", text: "Done. Key sk-ant-abc123XYZ456def789ghi saved." },
+        ],
+      },
+    },
+  ];
+  const file = path.join(os.tmpdir(), `dh-transcript-${process.pid}.jsonl`);
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n"));
+  const text = lastAssistantText(file);
+  fs.unlinkSync(file);
+  assert.match(text, /^Done\./);
+  assert.match(text, /\[redacted\]/);
+  assert.doesNotMatch(text, /first reply/);
+});
+
+test("lastAssistantText: caps length and survives a missing file", () => {
+  const file = path.join(os.tmpdir(), `dh-long-${process.pid}.jsonl`);
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "y".repeat(2000) }] } }),
+  );
+  assert.equal(lastAssistantText(file).length, 500);
+  fs.unlinkSync(file);
+  assert.equal(lastAssistantText("/nope/missing.jsonl"), "");
+});
 
 test("shouldGate: only dashboard mode + gated tools", () => {
   assert.equal(shouldGate("dashboard", "Bash"), true);
@@ -114,10 +150,21 @@ test("PreToolUse: non-gated tool is a no-op", async () => {
 test("Stop: waits, injects queued prompt as continuation, cleans up", async () => {
   const { home, base } = dashboardHome();
   const sid = "sess-b";
-  const p = runHook(home, { hook_event_name: "Stop", session_id: sid, cwd: "/repo" });
+  const transcript = path.join(base, `${sid}-transcript.jsonl`);
+  fs.writeFileSync(
+    transcript,
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "All tests pass." }] } }),
+  );
+  const p = runHook(home, {
+    hook_event_name: "Stop",
+    session_id: sid,
+    cwd: "/repo",
+    transcript_path: transcript,
+  });
   await new Promise((r) => setTimeout(r, 150));
   const awaitingFile = path.join(base, "awaiting", `${sid}.json`);
   assert.ok(fs.existsSync(awaitingFile), "awaiting written");
+  assert.equal(JSON.parse(fs.readFileSync(awaitingFile, "utf8")).lastReply, "All tests pass.");
   fs.mkdirSync(path.join(base, "queued"), { recursive: true });
   fs.writeFileSync(path.join(base, "queued", `${sid}.json`), JSON.stringify({ prompt: "fix the bug" }));
   const { code, out } = await p;

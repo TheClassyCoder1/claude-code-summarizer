@@ -83,10 +83,14 @@ test("readAwaitingPrompts returns fresh, drops stale", async () => {
   const dir = path.join(home, ".claude", "feature-log", "awaiting");
   await fs.mkdir(dir, { recursive: true });
   const now = Date.now();
-  await fs.writeFile(path.join(dir, "fresh.json"), JSON.stringify({ sessionId: "fresh", createdAt: new Date(now).toISOString() }));
+  await fs.writeFile(
+    path.join(dir, "fresh.json"),
+    JSON.stringify({ sessionId: "fresh", createdAt: new Date(now).toISOString(), lastReply: "All tests pass." }),
+  );
   await fs.writeFile(path.join(dir, "stale.json"), JSON.stringify({ sessionId: "stale", createdAt: new Date(now - 700_000).toISOString() }));
   const a = await readAwaitingPrompts(now);
   assert.deepEqual(a.map((x) => x.sessionId), ["fresh"]);
+  assert.equal(a[0].lastReply, "All tests pass.");
 });
 
 test("readPendingApprovals returns fresh, drops stale", async () => {

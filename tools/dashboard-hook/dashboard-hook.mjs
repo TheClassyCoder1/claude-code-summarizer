@@ -61,6 +61,35 @@ export function isStale(createdAt, now, windowMs) {
   return Number.isNaN(t) || now - t > windowMs;
 }
 
+// The last assistant text in the transcript — shown in the dashboard's Send box
+// as "what Claude just said" context. Redacted, capped; "" on any failure.
+export function lastAssistantText(transcriptPath) {
+  try {
+    const lines = fs.readFileSync(transcriptPath, "utf8").split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].trim()) continue;
+      let o;
+      try {
+        o = JSON.parse(lines[i]);
+      } catch {
+        continue;
+      }
+      if (o.type !== "assistant") continue;
+      const content = o.message?.content;
+      if (!Array.isArray(content)) continue;
+      const text = content
+        .filter((b) => b?.type === "text" && typeof b.text === "string")
+        .map((b) => b.text)
+        .join("\n")
+        .trim();
+      if (text) return redactSecrets(text).slice(0, 500);
+    }
+  } catch {
+    /* missing/unreadable transcript */
+  }
+  return "";
+}
+
 function readControl() {
   try {
     const c = JSON.parse(fs.readFileSync(MODE_FILE, "utf8"));
@@ -142,7 +171,11 @@ async function handlePrompt(input, windowMs) {
   const sid = input.session_id;
   const awaitingFile = path.join(AWAITING_DIR, `${sid}.json`);
   const queuedFile = path.join(QUEUED_DIR, `${sid}.json`);
-  writeAtomic(awaitingFile, { sessionId: sid, createdAt: new Date().toISOString() });
+  writeAtomic(awaitingFile, {
+    sessionId: sid,
+    createdAt: new Date().toISOString(),
+    lastReply: lastAssistantText(input.transcript_path),
+  });
   const prompt = await poll(awaitingFile, windowMs, () => {
     try {
       const p = JSON.parse(fs.readFileSync(queuedFile, "utf8")).prompt;

@@ -19,7 +19,7 @@ export default async function Home() {
     readRelayWindowMs(),
   ]);
   const pendingBySession = Object.fromEntries(pending.map((p) => [p.sessionId, p]));
-  const awaitingSessions = new Set(awaiting.map((a) => a.sessionId));
+  const awaitingBySession = Object.fromEntries(awaiting.map((a) => [a.sessionId, a]));
   const attention =
     pending.length +
     awaiting.length +
@@ -46,7 +46,7 @@ export default async function Home() {
         <FeatureDashboard
           records={records}
           pendingBySession={pendingBySession}
-          awaitingSessions={awaitingSessions}
+          awaitingBySession={awaitingBySession}
         />
       </div>
       <AutoRefresh />

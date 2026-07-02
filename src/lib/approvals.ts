@@ -113,18 +113,22 @@ export async function readPendingApprovals(now: number = Date.now()): Promise<Pe
   return out;
 }
 
-const awaitingSchema = z.object({ sessionId: z.string(), createdAt: z.string() });
+const awaitingSchema = z.object({
+  sessionId: z.string(),
+  createdAt: z.string(),
+  lastReply: z.string().optional(),
+});
 
-export async function readAwaitingPrompts(
-  now: number = Date.now(),
-): Promise<{ sessionId: string; createdAt: string }[]> {
+export type AwaitingPrompt = z.infer<typeof awaitingSchema>;
+
+export async function readAwaitingPrompts(now: number = Date.now()): Promise<AwaitingPrompt[]> {
   let files: string[];
   try {
     files = await fs.readdir(awaitingDir());
   } catch {
     return [];
   }
-  const out: { sessionId: string; createdAt: string }[] = [];
+  const out: AwaitingPrompt[] = [];
   for (const f of files) {
     if (!f.endsWith(".json")) continue;
     try {
